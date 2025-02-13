@@ -138,7 +138,10 @@ class Bot:
             await self.session.close()
             self.session = None
 
-    async def send_message(self, chat_id: int, message: str, parse_mode: str="HTML", reply_markup=None):
+    async def send_message(self, chat_id: int, message: str, message_id: int=None, parse_mode: str="HTML", reply_markup=None):
+        if not isinstance(parse_mode, str):
+            loggers.types.error(f"Expected 'parse_mode' to be a string, got {type(parse_mode).__name__}")
+            return
         await self.start_session()
         
         payload = {
@@ -149,6 +152,8 @@ class Bot:
         
         if reply_markup:
             payload["reply_markup"] = reply_markup
+        if message_id:
+            payload["reply_to_message_id"] = message_id
 
         try:
             async with self.session.post(self.url + "sendMessage", json=payload) as response:
@@ -160,7 +165,10 @@ class Bot:
             loggers.bot.error(f"{e}")
             return {"ok": False, "error": str(e)}
     
-    async def send_photo(self, chat_id: int, file_path: str, caption: str = None, parse_mode: str="HTML", reply_markup=None):
+    async def send_photo(self, chat_id: int, file_path: str, message_id: int, caption: str = None, parse_mode: str="HTML", reply_markup=None):
+        if not isinstance(parse_mode, str):
+            loggers.types.error(f"Expected 'parse_mode' to be a string, got {type(parse_mode).__name__}")
+            return
         await self.start_session()
         
         try:
@@ -177,10 +185,13 @@ class Bot:
                 if reply_markup:
                     form_data.add_field("reply_markup", reply_markup)
                 
+                if message_id:
+                    form_data.add_field("reply_to_message_id", message_id)
+                
                 # Отправка запроса
                 async with self.session.post(f"{self.url}sendPhoto", data=form_data) as response:
                     response.raise_for_status()  # Бросает исключение при HTTP-ошибке
-                    loggers.bot.info("The message has been sent successfully.")
+                    loggers.bot.info("The photo was successfully sent.")
                     data = await response.json()
                     return data.get("result")
         

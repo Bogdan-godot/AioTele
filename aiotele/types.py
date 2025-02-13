@@ -7,6 +7,8 @@ import logging
 import asyncio
 from . import loggers
 
+from typing import List, Dict, Union
+
 logging.basicConfig(level=logging.INFO)
 
 class From_user:
@@ -52,6 +54,9 @@ class MessageObject:
             self.session = None
     
     async def answer(self, message: str, parse_mode: str="HTML", reply_markup=None):
+        if not isinstance(parse_mode, str):
+            loggers.types.error(f"Expected 'parse_mode' to be a string, got {type(parse_mode).__name__}")
+            return
         await self.start_session()
         
         payload = {
@@ -76,6 +81,9 @@ class MessageObject:
             await self.close_session()
     
     async def reply(self, message: str, parse_mode: str="HTML", reply_markup=None):
+        if not isinstance(parse_mode, str):
+            loggers.types.error(f"Expected 'parse_mode' to be a string, got {type(parse_mode).__name__}")
+            return
         await self.start_session()
         
         payload = {
@@ -99,6 +107,114 @@ class MessageObject:
             return {"ok": False, "error": str(e)}
         finally:
             await self.close_session()
+    
+    async def reply_photo(self, file_path: str=None, url_photo: str=None, caption: str = None, parse_mode: str="HTML", reply_markup=None):
+        if not isinstance(parse_mode, str):
+            loggers.types.error(f"Expected 'parse_mode' to be a string, got {type(parse_mode).__name__}")
+            return
+
+        if not isinstance(url_photo, str):
+            loggers.types.error(f"Expected 'url_photo' to be a string, got {type(url_photo).__name__}")
+            return
+        await self.start_session()
+        
+        try:
+            if file_path:
+                # Чтение файла и создание FormData
+                with open(file_path, "rb") as photo_file:
+                    form_data = aiohttp.FormData()
+                    form_data.add_field("chat_id", str(self.chat.id))
+                    form_data.add_field("photo", photo_file, filename=file_path.split("/")[-1])
+                    form_data.add_field("parse_mode", parse_mode)
+                    form_data.add_field("reply_to_message_id", self.message_id)
+
+                    if caption:
+                        form_data.add_field("caption", caption)
+
+                    if reply_markup:
+                        form_data.add_field("reply_markup", reply_markup)
+            else:
+                form_data = aiohttp.FormData()
+                form_data.add_field("chat_id", str(self.chat.id))
+                form_data.add_field("photo", url_photo)
+                form_data.add_field("parse_mode", parse_mode)
+                form_data.add_field("reply_to_message_id", self.message_id)
+
+                if caption:
+                    form_data.add_field("caption", caption)
+
+                if reply_markup:
+                    form_data.add_field("reply_markup", reply_markup)
+                
+                # Отправка запроса
+                async with self.session.post(f"{self.__url}sendPhoto", data=form_data) as response:
+                    response.raise_for_status()  # Бросает исключение при HTTP-ошибке
+                    loggers.bot.info("The photo was successfully sent.")
+                    data = await response.json()
+                    await self.close_session()
+                    return data.get("result")
+        
+        except aiohttp.ClientError as e:
+            loggers.bot.error(f"{e}")
+            return {"ok": False, "error": str(e)}
+        
+        except FileNotFoundError:
+            error_message = f"File not found: {file_path}"
+            loggers.bot.error(error_message)
+            return {"ok": False, "error": error_message}
+    
+    async def answer_photo(self, file_path: str=None, url_photo: str=None, caption: str = None, parse_mode: str="HTML", reply_markup=None):
+        if not isinstance(parse_mode, str):
+            loggers.types.error(f"Expected 'parse_mode' to be a string, got {type(parse_mode).__name__}")
+            return
+
+        if not isinstance(url_photo, str):
+            loggers.types.error(f"Expected 'url_photo' to be a string, got {type(url_photo).__name__}")
+            return
+        await self.start_session()
+        
+        try:
+            if file_path:
+                # Чтение файла и создание FormData
+                with open(file_path, "rb") as photo_file:
+                    form_data = aiohttp.FormData()
+                    form_data.add_field("chat_id", str(self.chat.id))
+                    form_data.add_field("photo", photo_file, filename=file_path.split("/")[-1])
+                    form_data.add_field("parse_mode", parse_mode)
+
+                    if caption:
+                        form_data.add_field("caption", caption)
+
+                    if reply_markup:
+                        form_data.add_field("reply_markup", reply_markup)
+            else:
+                form_data = aiohttp.FormData()
+                form_data.add_field("chat_id", str(self.chat.id))
+                form_data.add_field("photo", url_photo)
+                form_data.add_field("parse_mode", parse_mode)
+
+                if caption:
+                    form_data.add_field("caption", caption)
+
+                if reply_markup:
+                    form_data.add_field("reply_markup", reply_markup)
+                
+                # Отправка запроса
+                async with self.session.post(f"{self.__url}sendPhoto", data=form_data) as response:
+                    response.raise_for_status()  # Бросает исключение при HTTP-ошибке
+                    loggers.bot.info("The photo was successfully sent.")
+                    data = await response.json()
+                    await self.close_session()
+                    return data.get("result")
+        
+        except aiohttp.ClientError as e:
+            loggers.bot.error(f"{e}")
+            return {"ok": False, "error": str(e)}
+        
+        except FileNotFoundError:
+            error_message = f"File not found: {file_path}"
+            loggers.bot.error(error_message)
+            return {"ok": False, "error": error_message}
 
 class CallbackQuery:
     def __init__(self, obj: dict, token: str):
