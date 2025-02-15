@@ -9,8 +9,8 @@ from .bot import *
 from .html import *
 from .loggers import *
 from .types import *
-from .buttons import *
+from .keyboards import *
 
 __author__ = "Bogdan Boris"
-__version__ = "0.0.7"
+__version__ = "0.0.9"
 __email__ = "gdrghdhgddy@gmail.com"
