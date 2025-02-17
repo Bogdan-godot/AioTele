@@ -4,13 +4,25 @@ An example of a bot on AioTele:
 ```python
 from aiotele.bot import Bot
 from aiotele.keyboards import Button, MarkupButton, MarkupButtonInline, InlineButton
-from aiotele import html
-from aiotele.types import MessageObject, CommandObject, CallbackQuery
+from aiotele import html, LEAVE_TRANSITION, JOIN_TRANSITION, JOIN_TRANSITION
+from aiotele.types import MessageObject, CommandObject, CallbackQuery, NewChatMember, LeaveChatMember
 from aiotele.exceptions import ValidationError, TelegramBadRequest
 import asyncio
 
 TOKEN = "YOU_TOKEN"
 bot = Bot(TOKEN)
+
+@bot.chat_member(LEAVE_TRANSITION)
+async def leave_chat_member(leave_member: LeaveChatMember):
+    await leave_member.reply(f"Bye {leave_member.leave_member.full_name}! was deleted by the administrator {leave_member.from_user.full_name}!")
+
+@bot.chat_member(JOIN_TRANSITION)
+async def new_chat_member(new_member: NewChatMember):
+    await new_member.answer(f"Hello {new_member.new_member.full_name}! Added you {new_member.old_member.full_name}!")
+
+@bot.my_chat_member(JOIN_TRANSITION)
+async def bot_join_chat_member(new_member: NewChatMember):
+    await new_member.answer(f"Thank you for adding me to the chat. {new_member.old_member.full_name}!")
 
 @bot.message_handler("inline", prefix="!/.")
 async def start(msg: MessageObject, command: CommandObject):
@@ -40,9 +52,9 @@ async def start(msg: MessageObject, command: CommandObject):
     """
     An example of processing messages that the bot does not know about:
     ```
-    await msg.reply(f"Я незнаю такой команды!")
+    await msg.reply(f"I don't know such a command!")
     if msg.reply_to_message != None:
-        await msg.reply_to_message.reply(f"Я незнаю такой команды!")
+        await msg.reply_to_message.reply(f"I don't know such a command!")
     ```
     """
     await msg.reply(f"I don't know such a command!")

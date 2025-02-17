@@ -1,7 +1,7 @@
 import aiohttp.client_exceptions
 import aiohttp.http_exceptions
 import aiohttp.web
-from aiotele.types import MessageObject, GetChat, CommandObject, GetMe, CallbackQuery
+from aiotele.types import MessageObject, GetChat, CommandObject, GetMe, CallbackQuery, NewChatMember, LeaveChatMember
 import aiohttp
 import asyncio
 
@@ -15,6 +15,7 @@ from contextlib import suppress
 
 from typing import List, Optional
 from .exceptions import *
+from .transitions import JOIN_TRANSITION, LEAVE_TRANSITION
 
 class CommandHandler:
     def __init__(self, token: str):
@@ -57,7 +58,9 @@ class CommandHandler:
             user_id = from_info.get("id", 0)
             full_name = f"{from_info.get('first_name', '')} {from_info.get('last_name', '')}".strip()
             chat = message.get("chat", {})
-            type_chat = chat.get("type", "None")
+            type_chat = chat.get("type", None)
+            title = chat.get("title", None)
+            chat_username = chat.get("username", None)
             chat_id = chat.get("id", 0)
             message_id = message.get("message_id", 0)
 
@@ -83,6 +86,8 @@ class CommandHandler:
                 reply_to_message_message_id=reply_to_message_id,
                 token=self.__token,
                 type_chat=type_chat,
+                title=title,
+                chat_username=chat_username,
                 message_text=text
             )
             command_obj = CommandObject(
@@ -125,12 +130,100 @@ class CallbackDataHandler:
             callback_obj = CallbackQuery(callback, self.__token)
             await handler(callback_obj)
 
+class ChatMemberHandler:
+    def __init__(self, token: str):
+        self.__token = token
+        self.handlers = {}  # Словарь для хранения обработчиков: {индикатор: функция}
+
+    def chat_member(self, indicator: int):
+        """Декоратор для регистрации обработчиков по индикаторам"""
+        def wrapper(func):
+            self.handlers[indicator] = func
+            return func
+        return wrapper
+
+    async def handle(self, update, indicator: int, bot_id: int):
+        """Обработка события с учётом индикатора"""
+        message = update.get("message", {})
+        new_chat_members = message.get("new_chat_members", [])
+        leave_chat_member = message.get("left_chat_member", [])
+        chat = message.get("chat", {})
+        
+        handler = self.handlers.get(indicator)
+        
+        if new_chat_members:
+            if handler:
+                if indicator == JOIN_TRANSITION:
+                    for new_member in new_chat_members:
+                        if new_member.get("id") == bot_id:
+                            continue
+                        await handler(
+                            NewChatMember(
+                                new_member=new_member,
+                                old_member=message.get("from", {}),
+                                chat=chat,
+                                message_id=message.get("message_id"),
+                                token=self.__token,
+                            )
+                        )
+        elif leave_chat_member:
+            if indicator == LEAVE_TRANSITION:
+                if leave_chat_member.get("id") == bot_id:
+                    return
+                await handler(
+                    LeaveChatMember(
+                        leave_member=leave_chat_member,
+                        administrator=message.get("from", {}),
+                        chat=chat,
+                        message_id=message.get("message_id"),
+                        token=self.__token,
+                    )
+                )
+
+class MyChatMemberHandler:
+    def __init__(self, token: str):
+        self.__token = token
+        self.handlers = {}  # Словарь для хранения обработчиков: {индикатор: функция}
+
+    def my_chat_member(self, indicator: int):
+        """Декоратор для регистрации обработчиков по индикаторам"""
+        def wrapper(func):
+            self.handlers[indicator] = func
+            return func
+        return wrapper
+    
+    async def handle(self, update, indicator: int, bot_id: int):
+        """Обработка события с учётом индикатора"""
+        message = update.get("message", {})
+        new_chat_members = message.get("new_chat_members", [])
+        chat = message.get("chat", {})
+        
+        handler = self.handlers.get(indicator)
+        
+        if new_chat_members:
+            if handler:
+                if indicator == JOIN_TRANSITION:
+                    for new_member in new_chat_members:
+                        if new_member.get("id") == bot_id:
+                            await handler(
+                                NewChatMember(
+                                    new_member=new_member,
+                                    old_member=message.get("from", {}),
+                                    chat=chat,
+                                    message_id=message.get("message_id"),
+                                    token=self.__token,
+                                )
+                            )
+                            break
+
 class Bot:
     def __init__(self, TOKEN: str):
         self.__token = TOKEN
         self.__url = f"https://api.telegram.org/bot{self.__token}/"
         self.__message_handler = CommandHandler(token=self.__token)
         self.__callback_handler = CallbackDataHandler(token=self.__token)
+        self.__chat_member_handler = ChatMemberHandler(token=self.__token)
+        self.__my_chat_member_handler = MyChatMemberHandler(token=self.__token)
         self.update_offset = 0
         self.session = None
         self.ssl_context = ssl.create_default_context(cafile=certifi.where())
@@ -140,6 +233,12 @@ class Bot:
 
     def callback_handler(self, command: str = None):
         return self.__callback_handler.callback(command)
+    
+    def chat_member(self, indicator: int):
+        return self.__chat_member_handler.chat_member(indicator)
+    
+    def my_chat_member(self, indicator: int):
+        return self.__my_chat_member_handler.my_chat_member(indicator)
 
     async def start_session(self):
         if not self.session:
@@ -150,7 +249,7 @@ class Bot:
             await self.session.close()
             self.session = None
 
-    async def send_message(self, chat_id: int, message: str, reply_to_message_id: int=None, parse_mode: str="HTML", reply_markup=None):
+    async def send_message(self, chat_id: int, message: str, reply_to_message_id: int=None, parse_mode: str="HTML", reply_markup=None) -> MessageObject:
         if not isinstance(parse_mode, str):
             loggers.event.error(f"Expected 'parse_mode' to be a string, got {type(parse_mode).__name__}")
             return False
@@ -182,7 +281,7 @@ class Bot:
                 data_chat = data.get("chat")
                 return MessageObject(message_id=int(data.get("message_id")), fullname=data_from.get("fullname"), username=data_from.get("username"),
                                      is_bot=data_from.get("is_bot"), message_text=data.get("text"), user_id=data_from.get("id"),
-                                     chat_id=data_chat.get("id"), type_chat=data_chat.get("type"), token=self.__token)
+                                     chat_id=data_chat.get("id"), type_chat=data_chat.get("type"), title=data_chat.get("title", None), chat_username=data_chat.get("username", None), token=self.__token)
         except Exception as e:
             raise ValidationError(f"{e}")
     
@@ -287,10 +386,23 @@ class Bot:
                         loggers.event.info("Update has been successfully handled.")
                         await self.__callback_handler.handle(update, self)
                         break
-                    
+                    if update.get("message", {}).get("new_chat_members", None) != None:
+                        self.update_offset = update["update_id"] + 1
+                        loggers.event.info("Update has been successfully handled.")
+                        await self.__chat_member_handler.handle(update, JOIN_TRANSITION, bot_id=(await self.get_me()).id)
+                        await self.__my_chat_member_handler.handle(update, JOIN_TRANSITION, bot_id=(await self.get_me()).id)
+                        break
+                    if update.get("message", {}).get("left_chat_member", None) != None:
+                        self.update_offset = update["update_id"] + 1
+                        loggers.event.info("Update has been successfully handled.")
+                        await self.__chat_member_handler.handle(update, LEAVE_TRANSITION, bot_id=(await self.get_me()).id)
+                        break
+                    if update.get("message", {}).get("text", None) != None:
+                        self.update_offset = update["update_id"] + 1
+                        loggers.event.info("Update has been successfully handled.")
+                        await self.__message_handler.handle(update, self)
+                        break
                     self.update_offset = update["update_id"] + 1
-                    loggers.event.info("Update has been successfully handled.")
-                    await self.__message_handler.handle(update, self)
 
     async def get_me(self):
         await self.start_session()
@@ -325,7 +437,7 @@ class Bot:
                 data_chat = data.get("chat")
                 return MessageObject(message_id=int(data.get("message_id")), fullname=data_from.get("fullname"), username=data_from.get("username"),
                                      is_bot=data_from.get("is_bot"), message_text=data.get("text"), user_id=data_from.get("id"),
-                                     chat_id=data_chat.get("id"), type_chat=data_chat.get("type"), token=self.__token)
+                                     chat_id=data_chat.get("id"), type_chat=data_chat.get("type"), title=data_chat.get("title", None), chat_username=data_chat.get("username", None), token=self.__token)
             else:
                 raise TelegramBadRequest((await response.json()).get("description"))
     

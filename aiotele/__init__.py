@@ -11,7 +11,8 @@ from .loggers import *
 from .types import *
 from .keyboards import *
 from .exceptions import *
+from .transitions import *
 
 __author__ = "Bogdan Boris"
-__version__ = "0.1.2"
+__version__ = "0.1.3"
 __email__ = "gdrghdhgddy@gmail.com"
